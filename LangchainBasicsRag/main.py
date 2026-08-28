@@ -345,7 +345,7 @@ print("=" * 60)
 # EVALUATION K
 # =========================================
 
-k = 3
+k = 1
 
 
 # =========================================
@@ -412,7 +412,7 @@ for item in evaluation_dataset:
         dense_retriever=dense_retriever,
         bm25_retriever=bm25_retriever,
         reranker=reranker,
-        final_k=3
+        final_k=1
     )
 
 
