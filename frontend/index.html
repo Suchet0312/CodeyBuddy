@@ -1,0 +1,1727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CodeLens — Codebase Intelligence</title>
+  <style>
+    /* =============================================
+       RESET & TOKENS
+    ============================================= */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-base:        #0d1117;
+      --bg-surface:     #161b22;
+      --bg-elevated:    #1c2128;
+      --bg-card:        #21262d;
+      --bg-hover:       #2d333b;
+      --border:         #30363d;
+      --border-subtle:  #21262d;
+
+      --accent:         #58a6ff;
+      --accent-dim:     #1f3858;
+      --accent-glow:    rgba(88, 166, 255, 0.15);
+      --green:          #3fb950;
+      --green-dim:      #1a3726;
+      --amber:          #d29922;
+      --amber-dim:      #3b2d00;
+      --red:            #f85149;
+      --red-dim:        #3d1a1a;
+      --purple:         #bc8cff;
+      --purple-dim:     #2d1f52;
+
+      --text-primary:   #e6edf3;
+      --text-secondary: #8b949e;
+      --text-muted:     #484f58;
+      --text-code:      #79c0ff;
+
+      --font-sans:  'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --font-mono:  'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+
+      --radius-sm: 4px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+
+      --transition: 150ms ease;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.6;
+      overflow: hidden;
+    }
+
+    /* =============================================
+       LAYOUT — three-column shell
+    ============================================= */
+    #app {
+      display: grid;
+      grid-template-rows: 52px 1fr;
+      grid-template-columns: 300px 1fr 320px;
+      grid-template-areas:
+        "header  header  header"
+        "sidebar chat    evidence";
+      height: 100vh;
+    }
+
+    /* =============================================
+       HEADER
+    ============================================= */
+    #header {
+      grid-area: header;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 20px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      z-index: 10;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: var(--text-primary);
+      text-decoration: none;
+    }
+    .logo-icon {
+      width: 28px; height: 28px;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--purple) 100%);
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15px;
+    }
+    .logo-label { color: var(--accent); }
+
+    .header-tagline {
+      margin-left: 4px;
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+
+    .header-spacer { flex: 1; }
+
+    #repo-badge {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: var(--green-dim);
+      border: 1px solid var(--green);
+      border-radius: 20px;
+      font-size: 11px;
+      color: var(--green);
+      font-weight: 600;
+    }
+    #repo-badge.visible { display: flex; }
+    #repo-badge .dot {
+      width: 6px; height: 6px;
+      background: var(--green);
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* =============================================
+       SIDEBAR
+    ============================================= */
+    #sidebar {
+      grid-area: sidebar;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .sidebar-section {
+      padding: 16px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .sidebar-section:last-child { border-bottom: none; }
+
+    .section-title {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    /* Tab switcher */
+    .tab-row {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 14px;
+      background: var(--bg-card);
+      border-radius: var(--radius-md);
+      padding: 3px;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 5px 8px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      transition: var(--transition);
+    }
+    .tab-btn.active {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+    }
+    .tab-btn:hover:not(.active) { background: var(--bg-hover); }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* Inputs */
+    .input-group { display: flex; flex-direction: column; gap: 6px; }
+    .input-label {
+      font-size: 11px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+    input[type="text"], input[type="url"] {
+      width: 100%;
+      padding: 8px 10px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      transition: border-color var(--transition);
+      outline: none;
+    }
+    input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+    input::placeholder { color: var(--text-muted); }
+
+    /* Drop zone */
+    #drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius-md);
+      padding: 20px 12px;
+      text-align: center;
+      cursor: pointer;
+      transition: all var(--transition);
+      color: var(--text-secondary);
+      font-size: 12px;
+    }
+    #drop-zone:hover, #drop-zone.drag-over {
+      border-color: var(--accent);
+      background: var(--accent-glow);
+      color: var(--accent);
+    }
+    #drop-zone .drop-icon { font-size: 24px; display: block; margin-bottom: 6px; }
+    #drop-zone input[type="file"] { display: none; }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--transition);
+      width: 100%;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #0d1117;
+    }
+    .btn-primary:hover { background: #79c0ff; }
+    .btn-primary:disabled { background: var(--text-muted); cursor: not-allowed; }
+    .btn-danger {
+      background: transparent;
+      border: 1px solid var(--red);
+      color: var(--red);
+    }
+    .btn-danger:hover { background: var(--red-dim); }
+
+    /* Status panel */
+    #repo-status-panel {
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+    }
+    #repo-status-panel.visible { display: flex; }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+    }
+    .status-key { color: var(--text-secondary); }
+    .status-val { color: var(--text-primary); font-weight: 500; font-family: var(--font-mono); font-size: 11px; }
+
+    .status-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .status-indicator.indexed {
+      background: var(--green-dim);
+      color: var(--green);
+      border: 1px solid var(--green);
+    }
+    .status-indicator.indexing {
+      background: var(--amber-dim);
+      color: var(--amber);
+      border: 1px solid var(--amber);
+    }
+    .status-indicator.error {
+      background: var(--red-dim);
+      color: var(--red);
+      border: 1px solid var(--red);
+    }
+
+    /* File list */
+    #file-list-section { display: none; }
+    #file-list-section.visible { display: block; }
+    #file-list {
+      max-height: 160px;
+      overflow-y: auto;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-secondary);
+      line-height: 1.8;
+    }
+    #file-list .file-entry {
+      padding: 1px 0;
+      cursor: pointer;
+      transition: color var(--transition);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #file-list .file-entry:hover { color: var(--accent); }
+
+    /* Progress bar */
+    #indexing-progress {
+      display: none;
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    #indexing-progress.visible { display: block; }
+    #indexing-progress-bar {
+      height: 100%;
+      width: 30%;
+      background: linear-gradient(90deg, var(--accent), var(--purple));
+      border-radius: 2px;
+      animation: slide 1.2s ease-in-out infinite alternate;
+    }
+    @keyframes slide {
+      from { transform: translateX(-100%); }
+      to   { transform: translateX(400%); }
+    }
+
+    /* =============================================
+       CHAT AREA
+    ============================================= */
+    #chat {
+      grid-area: chat;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-base);
+      overflow: hidden;
+    }
+
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* Empty state */
+    #empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      color: var(--text-secondary);
+      text-align: center;
+      padding: 40px;
+    }
+    .empty-icon {
+      font-size: 48px;
+      opacity: 0.4;
+    }
+    .empty-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+    .empty-subtitle {
+      font-size: 13px;
+      color: var(--text-muted);
+      max-width: 360px;
+    }
+    .suggestion-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      margin-top: 8px;
+    }
+    .chip {
+      padding: 6px 12px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+    .chip:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-glow);
+    }
+
+    /* Message bubbles */
+    .message {
+      display: flex;
+      gap: 12px;
+      animation: fadeIn 200ms ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .message-avatar {
+      width: 28px; height: 28px;
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .message.user .message-avatar {
+      background: var(--accent-dim);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+    }
+    .message.assistant .message-avatar {
+      background: linear-gradient(135deg, var(--accent) 0%, var(--purple) 100%);
+      color: #0d1117;
+    }
+    .message-body { flex: 1; min-width: 0; }
+    .message-role {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+    .message.user .message-role { color: var(--accent); }
+    .message.assistant .message-role { color: var(--purple); }
+
+    .message-content {
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--text-primary);
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    /* Code blocks inside answers */
+    .message-content code {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      background: var(--bg-card);
+      padding: 1px 5px;
+      border-radius: 3px;
+      color: var(--text-code);
+    }
+    .message-content pre {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      overflow-x: auto;
+      margin: 8px 0;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1.6;
+      color: var(--text-code);
+    }
+    .message-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 6px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .meta-badge {
+      padding: 1px 7px;
+      border-radius: 12px;
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .meta-badge.time { background: var(--bg-card); color: var(--text-muted); }
+    .meta-badge.files {
+      background: var(--accent-dim);
+      color: var(--accent);
+      cursor: pointer;
+      transition: var(--transition);
+    }
+    .meta-badge.files:hover { background: var(--accent); color: #0d1117; }
+
+    /* Thinking indicator */
+    .thinking {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      animation: fadeIn 200ms ease;
+    }
+    .thinking-dots {
+      display: flex;
+      gap: 4px;
+      padding-top: 6px;
+    }
+    .thinking-dots span {
+      width: 6px; height: 6px;
+      background: var(--text-muted);
+      border-radius: 50%;
+      animation: bounce 1.2s ease-in-out infinite;
+    }
+    .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+      40%           { transform: translateY(-6px); opacity: 1; }
+    }
+    .thinking-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      padding-top: 4px;
+      font-style: italic;
+    }
+
+    /* Input bar */
+    #input-bar {
+      padding: 16px 24px 20px;
+      border-top: 1px solid var(--border);
+      background: var(--bg-surface);
+    }
+    #input-form {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+    }
+    #question-input {
+      flex: 1;
+      resize: none;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 10px 14px;
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      line-height: 1.5;
+      max-height: 120px;
+      outline: none;
+      transition: border-color var(--transition);
+    }
+    #question-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+    #question-input::placeholder { color: var(--text-muted); }
+    #question-input:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    #send-btn {
+      width: 40px; height: 40px;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--radius-md);
+      color: #0d1117;
+      font-size: 16px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all var(--transition);
+      flex-shrink: 0;
+    }
+    #send-btn:hover:not(:disabled) { background: #79c0ff; transform: scale(1.05); }
+    #send-btn:disabled { background: var(--text-muted); cursor: not-allowed; transform: none; }
+
+    .input-hint {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 6px;
+      padding-left: 2px;
+    }
+
+    /* =============================================
+       EVIDENCE PANEL
+    ============================================= */
+    #evidence-panel {
+      grid-area: evidence;
+      background: var(--bg-surface);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .panel-header-tabs {
+      display: flex;
+      gap: 4px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .panel-tab {
+      padding: 4px 10px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
+      transition: var(--transition);
+      border-bottom: 2px solid transparent;
+    }
+    .panel-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    .panel-tab:hover:not(.active) { color: var(--text-primary); }
+
+    .panel-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+    }
+    .panel-pane { display: none; }
+    .panel-pane.active { display: block; }
+
+    /* Evidence files */
+    .evidence-file {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 8px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: background var(--transition);
+      border: 1px solid transparent;
+    }
+    .evidence-file:hover {
+      background: var(--bg-hover);
+      border-color: var(--border);
+    }
+    .evidence-file-icon { font-size: 13px; }
+    .evidence-file-name {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-code);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Tool evidence */
+    .tool-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      margin-bottom: 8px;
+      overflow: hidden;
+    }
+    .tool-card-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--purple);
+      cursor: pointer;
+      user-select: none;
+    }
+    .tool-card-body {
+      padding: 10px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-secondary);
+      white-space: pre-wrap;
+      max-height: 200px;
+      overflow-y: auto;
+      line-height: 1.6;
+    }
+
+    /* Trace */
+    .trace-item {
+      display: flex;
+      gap: 8px;
+      padding: 5px 0;
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 11px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+    .trace-item:last-child { border-bottom: none; }
+    .trace-step {
+      width: 18px; height: 18px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    /* Empty panel */
+    .panel-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 32px 16px;
+      color: var(--text-muted);
+      text-align: center;
+      font-size: 12px;
+    }
+    .panel-empty-icon { font-size: 28px; opacity: 0.3; }
+
+    /* =============================================
+       TOAST NOTIFICATIONS
+    ============================================= */
+    #toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 1000;
+    }
+    .toast {
+      padding: 10px 16px;
+      border-radius: var(--radius-md);
+      font-size: 12px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      animation: slideIn 200ms ease;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      min-width: 220px;
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(20px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    .toast.success { background: var(--green-dim); border: 1px solid var(--green); color: var(--green); }
+    .toast.error   { background: var(--red-dim);   border: 1px solid var(--red);   color: var(--red); }
+    .toast.info    { background: var(--accent-dim); border: 1px solid var(--accent); color: var(--accent); }
+    .toast.warning { background: var(--amber-dim); border: 1px solid var(--amber); color: var(--amber); }
+
+    /* =============================================
+       SCROLLBAR STYLING
+    ============================================= */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+    /* =============================================
+       FILE VIEWER MODAL
+    ============================================= */
+    #file-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+    }
+    #file-modal.open { display: flex; }
+    .modal-box {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      width: 100%;
+      max-width: 800px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+    .modal-title {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-code);
+    }
+    .modal-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+      transition: color var(--transition);
+    }
+    .modal-close:hover { color: var(--text-primary); }
+    #modal-content {
+      overflow: auto;
+      padding: 18px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1.7;
+      color: var(--text-code);
+      white-space: pre;
+      flex: 1;
+    }
+
+    /* =============================================
+       RESPONSIVE — collapse evidence panel narrow
+    ============================================= */
+    @media (max-width: 1100px) {
+      #app {
+        grid-template-columns: 260px 1fr 0px;
+        grid-template-areas:
+          "header  header  header"
+          "sidebar chat    chat";
+      }
+      #evidence-panel { display: none; }
+    }
+    @media (max-width: 720px) {
+      #app {
+        grid-template-columns: 1fr;
+        grid-template-rows: 52px auto 1fr;
+        grid-template-areas:
+          "header"
+          "sidebar"
+          "chat";
+      }
+      #sidebar { max-height: 300px; }
+    }
+  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- =============================================
+       HEADER
+  ============================================= -->
+  <header id="header">
+    <div class="logo">
+      <div class="logo-icon">🔭</div>
+      <span>Code<span class="logo-label">Lens</span></span>
+    </div>
+    <span class="header-tagline">Agentic Codebase Intelligence</span>
+    <div class="header-spacer"></div>
+    <div id="repo-badge">
+      <span class="dot"></span>
+      <span id="repo-badge-name">—</span>
+    </div>
+  </header>
+
+  <!-- =============================================
+       SIDEBAR
+  ============================================= -->
+  <aside id="sidebar">
+
+    <!-- Repository input -->
+    <div class="sidebar-section">
+      <div class="section-title">Repository</div>
+
+      <div class="tab-row">
+        <button class="tab-btn active" data-tab="upload">Upload</button>
+        <button class="tab-btn"        data-tab="github">GitHub</button>
+        <button class="tab-btn"        data-tab="local">Local</button>
+      </div>
+
+      <!-- Upload tab -->
+      <div class="tab-panel active" id="tab-upload">
+        <div id="drop-zone" onclick="document.getElementById('zip-input').click()" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+          <input type="file" id="zip-input" accept=".zip" onchange="onFileSelected(event)" />
+          <span class="drop-icon">📦</span>
+          <strong>Drop a .zip archive</strong><br>
+          or click to browse
+        </div>
+        <div id="upload-filename" style="font-size:11px;color:var(--text-secondary);margin-top:6px;display:none;font-family:var(--font-mono)"></div>
+        <div id="indexing-progress" style="margin-top:8px;">
+          <div id="indexing-progress-bar"></div>
+        </div>
+        <button class="btn btn-primary" id="upload-btn" style="margin-top:10px;" onclick="submitUpload()" disabled>
+          ⚡ Index Repository
+        </button>
+      </div>
+
+      <!-- GitHub tab -->
+      <div class="tab-panel" id="tab-github">
+        <div class="input-group">
+          <label class="input-label">Repository URL</label>
+          <input type="url" id="github-url" placeholder="https://github.com/owner/repo"
+                 onkeydown="if(event.key==='Enter') submitGithub()" oninput="validateGithubUrl()" />
+        </div>
+        <div id="url-error" style="font-size:11px;color:var(--red);margin-top:4px;display:none;"></div>
+        <div id="indexing-progress-github" style="margin-top:8px;">
+          <div id="indexing-progress-bar-github" style="height:3px;background:var(--border);border-radius:2px;overflow:hidden;display:none;">
+            <div style="height:100%;width:30%;background:linear-gradient(90deg,var(--accent),var(--purple));border-radius:2px;animation:slide 1.2s ease-in-out infinite alternate;"></div>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="github-btn" style="margin-top:10px;" onclick="submitGithub()" disabled>
+          ⚡ Clone &amp; Index
+        </button>
+      </div>
+
+      <!-- Local tab -->
+      <div class="tab-panel" id="tab-local">
+        <div class="input-group">
+          <label class="input-label">Folder path</label>
+          <input type="text" id="local-path" placeholder="C:\path\to\project or /path/to/project"
+                 onkeydown="if(event.key==='Enter') submitLocal()" oninput="document.getElementById('local-btn').disabled=!this.value.trim()" />
+        </div>
+        <button class="btn btn-primary" id="local-btn" style="margin-top:10px;" onclick="submitLocal()" disabled>
+          ⚡ Load &amp; Index
+        </button>
+      </div>
+    </div>
+
+    <!-- Repository status -->
+    <div class="sidebar-section">
+      <div class="section-title">Status</div>
+      <div id="repo-status-panel">
+        <div class="status-row">
+          <span class="status-key">Repository</span>
+          <span class="status-val" id="status-name">—</span>
+        </div>
+        <div class="status-row">
+          <span class="status-key">Source</span>
+          <span class="status-val" id="status-source">—</span>
+        </div>
+        <div class="status-row">
+          <span class="status-key">Files indexed</span>
+          <span class="status-val" id="status-files">0</span>
+        </div>
+        <div class="status-row">
+          <span class="status-key">Index</span>
+          <span id="status-indicator" class="status-indicator">—</span>
+        </div>
+      </div>
+      <div id="status-empty" style="font-size:12px;color:var(--text-muted);">
+        No repository loaded yet.
+      </div>
+    </div>
+
+    <!-- File list -->
+    <div class="sidebar-section" id="file-list-section">
+      <div class="section-title">Files</div>
+      <div id="file-list"></div>
+    </div>
+
+    <!-- Clear -->
+    <div class="sidebar-section" id="clear-section" style="display:none;">
+      <button class="btn btn-danger" onclick="clearRepository()">✕ Clear Repository</button>
+    </div>
+
+  </aside>
+
+  <!-- =============================================
+       CHAT
+  ============================================= -->
+  <main id="chat">
+    <div id="messages">
+      <div id="empty-state">
+        <div class="empty-icon">🔭</div>
+        <div class="empty-title">Ask anything about your codebase</div>
+        <div class="empty-subtitle">Load a repository from the sidebar, then ask CodeLens to investigate it.</div>
+        <div class="suggestion-chips" id="suggestion-chips">
+          <div class="chip" onclick="useSuggestion(this)">What files are in this repository?</div>
+          <div class="chip" onclick="useSuggestion(this)">How does authentication work?</div>
+          <div class="chip" onclick="useSuggestion(this)">Where is the main entry point?</div>
+          <div class="chip" onclick="useSuggestion(this)">Explain the payment flow</div>
+          <div class="chip" onclick="useSuggestion(this)">What classes are defined?</div>
+          <div class="chip" onclick="useSuggestion(this)">Where is login() used?</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="input-bar">
+      <div id="input-form">
+        <textarea id="question-input" placeholder="Ask CodeLens about the repository…" rows="1"
+                  onkeydown="onQuestionKeydown(event)" oninput="autoResize(this)" disabled></textarea>
+        <button id="send-btn" onclick="submitQuestion()" disabled title="Ask CodeLens">➤</button>
+      </div>
+      <div class="input-hint">Enter to send · Shift+Enter for new line</div>
+    </div>
+  </main>
+
+  <!-- =============================================
+       EVIDENCE PANEL
+  ============================================= -->
+  <aside id="evidence-panel">
+    <div class="panel-header">🔍 Investigation</div>
+    <div class="panel-header-tabs">
+      <button class="panel-tab active" data-pane="evidence">Evidence</button>
+      <button class="panel-tab"        data-pane="tools">Tools</button>
+      <button class="panel-tab"        data-pane="trace">Trace</button>
+    </div>
+    <div class="panel-body">
+
+      <div class="panel-pane active" id="pane-evidence">
+        <div class="panel-empty" id="evidence-empty">
+          <div class="panel-empty-icon">📄</div>
+          <span>Evidence files will appear here after a question is answered.</span>
+        </div>
+        <div id="evidence-list"></div>
+      </div>
+
+      <div class="panel-pane" id="pane-tools">
+        <div class="panel-empty" id="tools-empty">
+          <div class="panel-empty-icon">🔧</div>
+          <span>Tool calls and results will appear here.</span>
+        </div>
+        <div id="tools-list"></div>
+      </div>
+
+      <div class="panel-pane" id="pane-trace">
+        <div class="panel-empty" id="trace-empty">
+          <div class="panel-empty-icon">🗺️</div>
+          <span>Investigation steps will appear here.</span>
+        </div>
+        <div id="trace-list"></div>
+      </div>
+
+    </div>
+  </aside>
+
+</div>
+
+<!-- File viewer modal -->
+<div id="file-modal" onclick="if(event.target===this)closeModal()">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-filename">—</span>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div id="modal-content">Loading…</div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<script>
+/* ==============================================================
+   STATE
+============================================================== */
+const API = '';   // same origin — empty string means relative URLs
+let repoLoaded = false;
+let isAsking   = false;
+let pendingZip = null;
+
+/* ==============================================================
+   UTILITIES
+============================================================== */
+function toast(msg, type = 'info', duration = 3500) {
+  const icons = { success: '✓', error: '✕', info: 'ℹ', warning: '⚠' };
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.innerHTML = `<span>${icons[type]||'ℹ'}</span><span>${msg}</span>`;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), duration);
+}
+
+function setLoading(btnId, loading, originalText) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  btn.disabled = loading;
+  btn.textContent = loading ? '⏳ Working…' : originalText;
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function formatAnswer(text) {
+  // Very light markdown: code blocks and inline code
+  return escapeHtml(text)
+    .replace(/```([\s\S]*?)```/g, '<pre>$1</pre>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+}
+
+function fileIcon(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  const map = {
+    py: '🐍', js: '🟨', ts: '🔷', jsx: '⚛', tsx: '⚛',
+    java: '☕', go: '🐹', rs: '🦀', rb: '💎', cpp: '⚙',
+    c: '⚙', h: '⚙', cs: '💜', php: '🐘', swift: '🧡',
+    html: '🌐', css: '🎨', scss: '🎨', json: '📋',
+    yaml: '📋', yml: '📋', md: '📝', txt: '📄', sh: '⚡',
+    sql: '🗄', toml: '📋', env: '🔐',
+  };
+  return map[ext] || '📄';
+}
+
+/* ==============================================================
+   TABS (sidebar input)
+============================================================== */
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + tab).classList.add('active');
+  });
+});
+
+/* ==============================================================
+   PANEL TABS (evidence / tools / trace)
+============================================================== */
+document.querySelectorAll('.panel-tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const pane = btn.dataset.pane;
+    document.querySelectorAll('.panel-tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.panel-pane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('pane-' + pane).classList.add('active');
+  });
+});
+
+/* ==============================================================
+   DRAG & DROP
+============================================================== */
+function onDragOver(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.add('drag-over');
+}
+function onDragLeave(e) {
+  document.getElementById('drop-zone').classList.remove('drag-over');
+}
+function onDrop(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) handleZipFile(file);
+}
+function onFileSelected(e) {
+  const file = e.target.files[0];
+  if (file) handleZipFile(file);
+}
+function handleZipFile(file) {
+  if (!file.name.endsWith('.zip')) {
+    toast('Only .zip archives are supported.', 'error');
+    return;
+  }
+  pendingZip = file;
+  const fn = document.getElementById('upload-filename');
+  fn.textContent = '📦 ' + file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)';
+  fn.style.display = 'block';
+  document.getElementById('upload-btn').disabled = false;
+}
+
+/* ==============================================================
+   GITHUB URL VALIDATION
+============================================================== */
+function validateGithubUrl() {
+  const url = document.getElementById('github-url').value.trim();
+  const errEl = document.getElementById('url-error');
+  const btn   = document.getElementById('github-btn');
+  const githubRe = /^https?:\/\/(www\.)?github\.com\/[\w.\-]+\/[\w.\-]+(\.git)?(\/.*)?$/i;
+  if (!url) { errEl.style.display = 'none'; btn.disabled = true; return; }
+  if (!githubRe.test(url)) {
+    errEl.textContent = 'Enter a valid GitHub URL, e.g. https://github.com/owner/repo';
+    errEl.style.display = 'block';
+    btn.disabled = true;
+  } else {
+    errEl.style.display = 'none';
+    btn.disabled = false;
+  }
+}
+
+/* ==============================================================
+   POLLING — wait for indexing to complete
+============================================================== */
+let _pollingTimer = null;
+
+function startPolling(btnId, originalBtnText, progressKey) {
+  stopPolling();
+  let attempts = 0;
+  const MAX_ATTEMPTS = 300; // 300 × 2s = 10 minutes max wait
+
+  _pollingTimer = setInterval(async () => {
+    attempts++;
+    try {
+      const res = await fetch(`${API}/api/repository/status`);
+      if (!res.ok) return;
+      const data = await res.json();
+
+      renderStatus(data);
+
+      if (data.error) {
+        stopPolling();
+        showIndexingProgress(false, progressKey);
+        setLoading(btnId, false, originalBtnText);
+        toast('Indexing failed: ' + data.error, 'error', 8000);
+        return;
+      }
+
+      if (data.loaded) {
+        stopPolling();
+        showIndexingProgress(false, progressKey);
+        setLoading(btnId, false, originalBtnText);
+        onRepoLoaded(data);
+        toast(`✓ '${data.name}' indexed — ${data.file_count} files`, 'success', 5000);
+        return;
+      }
+
+      if (attempts >= MAX_ATTEMPTS) {
+        stopPolling();
+        showIndexingProgress(false, progressKey);
+        setLoading(btnId, false, originalBtnText);
+        toast('Indexing timed out. The repository may be too large.', 'warning', 8000);
+      }
+    } catch (_) { /* network hiccup — keep polling */ }
+  }, 2000);
+}
+
+function stopPolling() {
+  if (_pollingTimer) { clearInterval(_pollingTimer); _pollingTimer = null; }
+}
+
+/* ==============================================================
+   SUBMIT: ZIP UPLOAD
+============================================================== */
+async function submitUpload() {
+  if (!pendingZip) return;
+
+  setLoading('upload-btn', true, '⏳ Uploading…');
+  showIndexingProgress(true, 'upload');
+
+  const formData = new FormData();
+  formData.append('file', pendingZip);
+
+  try {
+    const res = await fetch(`${API}/api/repository/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch (_) { throw new Error('Server error: ' + (text || 'empty response')); }
+    if (!res.ok) throw new Error(data.detail || 'Upload failed');
+    // 202 → indexing started in background, poll for completion
+    setLoading('upload-btn', true, '⏳ Indexing…');
+    toast(`Indexing '${data.name}' (${data.file_count} files)…`, 'info', 4000);
+    startPolling('upload-btn', '⚡ Index Repository', 'upload');
+  } catch (err) {
+    showIndexingProgress(false, 'upload');
+    setLoading('upload-btn', false, '⚡ Index Repository');
+    toast('Upload failed: ' + err.message, 'error', 8000);
+  }
+}
+
+/* ==============================================================
+   SUBMIT: GITHUB URL
+============================================================== */
+async function submitGithub() {
+  const url = document.getElementById('github-url').value.trim();
+  if (!url) return;
+
+  setLoading('github-btn', true, '⏳ Cloning…');
+  showIndexingProgress(true, 'github');
+
+  try {
+    const res = await fetch(`${API}/api/repository/github`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch (_) { throw new Error('Server error: ' + (text || 'empty response')); }
+    if (!res.ok) throw new Error(data.detail || 'Clone failed');
+    setLoading('github-btn', true, '⏳ Indexing…');
+    toast(`Cloned '${data.name}', indexing ${data.file_count} files…`, 'info', 4000);
+    startPolling('github-btn', '⚡ Clone & Index', 'github');
+  } catch (err) {
+    showIndexingProgress(false, 'github');
+    setLoading('github-btn', false, '⚡ Clone & Index');
+    toast('GitHub clone failed: ' + err.message, 'error', 8000);
+  }
+}
+
+/* ==============================================================
+   SUBMIT: LOCAL PATH
+============================================================== */
+async function submitLocal() {
+  const path = document.getElementById('local-path').value.trim();
+  if (!path) return;
+
+  setLoading('local-btn', true, '⏳ Loading…');
+
+  try {
+    const res = await fetch(`${API}/api/repository/local`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch (_) { throw new Error('Server error: ' + (text || 'empty response')); }
+    if (!res.ok) throw new Error(data.detail || 'Load failed');
+    setLoading('local-btn', true, '⏳ Indexing…');
+    toast(`Loading '${data.name}', indexing ${data.file_count} files…`, 'info', 4000);
+    startPolling('local-btn', '⚡ Load & Index', 'local');
+  } catch (err) {
+    setLoading('local-btn', false, '⚡ Load & Index');
+    toast('Load failed: ' + err.message, 'error', 8000);
+  }
+}
+
+/* ==============================================================
+   ON REPO LOADED
+============================================================== */
+function onRepoLoaded(data) {
+  repoLoaded = true;
+  refreshStatus();
+  document.getElementById('question-input').disabled = false;
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('clear-section').style.display = 'block';
+}
+
+function showIndexingProgress(show, which) {
+  if (which === 'github') {
+    document.getElementById('indexing-progress-bar-github').style.display = show ? 'block' : 'none';
+  } else {
+    const el = document.getElementById('indexing-progress');
+    el.classList.toggle('visible', show);
+  }
+}
+
+/* ==============================================================
+   STATUS REFRESH
+============================================================== */
+async function refreshStatus() {
+  try {
+    const res = await fetch(`${API}/api/repository/status`);
+    const data = await res.json();
+    renderStatus(data);
+  } catch (_) {}
+}
+
+function renderStatus(data) {
+  const panel     = document.getElementById('repo-status-panel');
+  const empty     = document.getElementById('status-empty');
+  const badge     = document.getElementById('repo-badge');
+  const badgeName = document.getElementById('repo-badge-name');
+  const filesSec  = document.getElementById('file-list-section');
+
+  // Support both old field name and new
+  const isIndexing = data.indexing || data.indexing_in_progress || false;
+
+  if (!data.loaded && !isIndexing && !data.name) {
+    panel.classList.remove('visible');
+    empty.style.display = 'block';
+    badge.classList.remove('visible');
+    filesSec.classList.remove('visible');
+    return;
+  }
+
+  panel.classList.add('visible');
+  empty.style.display = 'none';
+
+  document.getElementById('status-name').textContent   = data.name || '—';
+  document.getElementById('status-source').textContent = data.source || '—';
+  document.getElementById('status-files').textContent  = data.file_count || 0;
+
+  const indicator = document.getElementById('status-indicator');
+  if (isIndexing) {
+    indicator.className = 'status-indicator indexing';
+    indicator.textContent = '⏳ Indexing…';
+    badge.classList.add('visible');
+    badgeName.textContent = (data.name || '—') + ' (indexing…)';
+  } else if (data.error) {
+    indicator.className = 'status-indicator error';
+    indicator.textContent = '✕ Error';
+  } else if (data.loaded) {
+    indicator.className = 'status-indicator indexed';
+    indicator.textContent = '✓ Indexed';
+    badge.classList.add('visible');
+    badgeName.textContent = data.name || '—';
+  }
+
+  if (data.loaded && data.files && data.files.length) {
+    filesSec.classList.add('visible');
+    const list = document.getElementById('file-list');
+    list.innerHTML = data.files.map(f =>
+      `<div class="file-entry" onclick="viewFile('${escapeHtml(f)}')" title="${escapeHtml(f)}">${fileIcon(f)} ${escapeHtml(f)}</div>`
+    ).join('');
+  }
+}
+
+/* ==============================================================
+   CLEAR REPOSITORY
+============================================================== */
+async function clearRepository() {
+  stopPolling();
+  try {
+    await fetch(`${API}/api/repository`, { method: 'DELETE' });
+  } catch (_) {}
+
+  repoLoaded = false;
+  document.getElementById('question-input').disabled = true;
+  document.getElementById('send-btn').disabled = true;
+  document.getElementById('clear-section').style.display = 'none';
+  document.getElementById('repo-badge').classList.remove('visible');
+  document.getElementById('file-list-section').classList.remove('visible');
+  document.getElementById('file-list').innerHTML = '';
+  document.getElementById('repo-status-panel').classList.remove('visible');
+  document.getElementById('status-empty').style.display = 'block';
+  pendingZip = null;
+  document.getElementById('upload-filename').style.display = 'none';
+  document.getElementById('upload-btn').disabled = true;
+  document.getElementById('github-url').value = '';
+  document.getElementById('local-path').value = '';
+  clearEvidence();
+  toast('Repository cleared.', 'info');
+}
+
+function clearEvidence() {
+  document.getElementById('evidence-list').innerHTML = '';
+  document.getElementById('tools-list').innerHTML = '';
+  document.getElementById('trace-list').innerHTML = '';
+  document.getElementById('evidence-empty').style.display = 'flex';
+  document.getElementById('tools-empty').style.display = 'flex';
+  document.getElementById('trace-empty').style.display = 'flex';
+}
+
+/* ==============================================================
+   CHAT
+============================================================== */
+function useSuggestion(el) {
+  if (!repoLoaded) {
+    toast('Load a repository first.', 'warning');
+    return;
+  }
+  document.getElementById('question-input').value = el.textContent;
+  submitQuestion();
+}
+
+function onQuestionKeydown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    submitQuestion();
+  }
+}
+
+async function submitQuestion() {
+  const input = document.getElementById('question-input');
+  const question = input.value.trim();
+  if (!question || isAsking) return;
+  if (!repoLoaded) { toast('Load a repository first.', 'warning'); return; }
+
+  isAsking = true;
+  input.value = '';
+  input.style.height = 'auto';
+  document.getElementById('send-btn').disabled = true;
+
+  // Hide empty state
+  document.getElementById('empty-state').style.display = 'none';
+
+  // Add user message
+  appendMessage('user', question);
+
+  // Add thinking indicator
+  const thinkingId = appendThinking();
+
+  // Clear previous evidence
+  clearEvidence();
+
+  try {
+    const res = await fetch(`${API}/api/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question }),
+    });
+    const data = await res.json();
+
+    removeThinking(thinkingId);
+
+    if (!res.ok) {
+      appendMessage('assistant', '⚠️ Error: ' + (data.detail || 'Unknown error'));
+      toast('Investigation failed: ' + (data.detail || ''), 'error', 6000);
+    } else {
+      appendMessage('assistant', data.answer, {
+        files: data.evidence_files || [],
+        duration: data.duration_seconds,
+      });
+      renderEvidence(data);
+    }
+  } catch (err) {
+    removeThinking(thinkingId);
+    appendMessage('assistant', '⚠️ Network error: ' + err.message);
+    toast('Network error: ' + err.message, 'error', 5000);
+  } finally {
+    isAsking = false;
+    document.getElementById('send-btn').disabled = false;
+    input.focus();
+  }
+}
+
+function appendMessage(role, text, meta = null) {
+  const container = document.getElementById('messages');
+  const avatars = { user: '👤', assistant: '🔭' };
+  const labels  = { user: 'You', assistant: 'CodeLens' };
+
+  const div = document.createElement('div');
+  div.className = `message ${role}`;
+
+  let metaHtml = '';
+  if (meta) {
+    const fileBadge = meta.files && meta.files.length
+      ? `<span class="meta-badge files" onclick="scrollToEvidence()" title="View evidence files">📄 ${meta.files.length} file${meta.files.length !== 1 ? 's' : ''}</span>`
+      : '';
+    const timeBadge = meta.duration
+      ? `<span class="meta-badge time">⏱ ${meta.duration}s</span>`
+      : '';
+    if (fileBadge || timeBadge) {
+      metaHtml = `<div class="message-meta">${fileBadge}${timeBadge}</div>`;
+    }
+  }
+
+  div.innerHTML = `
+    <div class="message-avatar">${avatars[role]}</div>
+    <div class="message-body">
+      <div class="message-role">${labels[role]}</div>
+      <div class="message-content">${formatAnswer(text)}</div>
+      ${metaHtml}
+    </div>
+  `;
+
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div;
+}
+
+let _thinkingCounter = 0;
+function appendThinking() {
+  const id = 'thinking-' + (++_thinkingCounter);
+  const container = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.id = id;
+  div.className = 'thinking';
+  div.innerHTML = `
+    <div class="message-avatar" style="background:var(--bg-card);border:1px solid var(--border);">🔭</div>
+    <div>
+      <div class="thinking-label">CodeLens is investigating…</div>
+      <div class="thinking-dots"><span></span><span></span><span></span></div>
+    </div>
+  `;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return id;
+}
+function removeThinking(id) {
+  const el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+/* ==============================================================
+   EVIDENCE PANEL
+============================================================== */
+function renderEvidence(data) {
+  // Evidence files
+  const evidenceList = document.getElementById('evidence-list');
+  const evidenceEmpty = document.getElementById('evidence-empty');
+  evidenceList.innerHTML = '';
+  if (data.evidence_files && data.evidence_files.length) {
+    evidenceEmpty.style.display = 'none';
+    data.evidence_files.forEach(f => {
+      const div = document.createElement('div');
+      div.className = 'evidence-file';
+      div.innerHTML = `
+        <span class="evidence-file-icon">${fileIcon(f)}</span>
+        <span class="evidence-file-name" title="${escapeHtml(f)}">${escapeHtml(f)}</span>
+      `;
+      div.onclick = () => viewFile(f);
+      evidenceList.appendChild(div);
+    });
+  } else {
+    evidenceEmpty.style.display = 'flex';
+  }
+
+  // Tool evidence
+  const toolsList = document.getElementById('tools-list');
+  const toolsEmpty = document.getElementById('tools-empty');
+  toolsList.innerHTML = '';
+  if (data.tool_evidence && data.tool_evidence.length) {
+    toolsEmpty.style.display = 'none';
+    data.tool_evidence.forEach((ev, i) => {
+      const card = document.createElement('div');
+      card.className = 'tool-card';
+      const bodyId = 'tool-body-' + i;
+      card.innerHTML = `
+        <div class="tool-card-header" onclick="toggleToolCard('${bodyId}')">
+          🔧 ${escapeHtml(ev.tool || 'tool')}
+          <span style="margin-left:auto;font-size:9px;color:var(--text-muted);">▼</span>
+        </div>
+        <div class="tool-card-body" id="${bodyId}">${escapeHtml(ev.content || '')}</div>
+      `;
+      toolsList.appendChild(card);
+    });
+  } else {
+    toolsEmpty.style.display = 'flex';
+  }
+
+  // Investigation trace
+  const traceList = document.getElementById('trace-list');
+  const traceEmpty = document.getElementById('trace-empty');
+  traceList.innerHTML = '';
+  if (data.investigation_history && data.investigation_history.length) {
+    traceEmpty.style.display = 'none';
+    data.investigation_history.forEach((step, i) => {
+      const div = document.createElement('div');
+      div.className = 'trace-item';
+      div.innerHTML = `
+        <div class="trace-step">${i + 1}</div>
+        <span>${escapeHtml(step)}</span>
+      `;
+      traceList.appendChild(div);
+    });
+  } else {
+    traceEmpty.style.display = 'flex';
+  }
+}
+
+function toggleToolCard(id) {
+  const body = document.getElementById(id);
+  if (body) body.style.display = body.style.display === 'none' ? 'block' : 'none';
+}
+
+function scrollToEvidence() {
+  // Switch to evidence pane and scroll panel into view
+  document.querySelectorAll('.panel-tab').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.panel-pane').forEach(p => p.classList.remove('active'));
+  document.querySelector('.panel-tab[data-pane="evidence"]').classList.add('active');
+  document.getElementById('pane-evidence').classList.add('active');
+}
+
+/* ==============================================================
+   FILE VIEWER MODAL
+============================================================== */
+async function viewFile(relPath) {
+  document.getElementById('modal-filename').textContent = relPath;
+  document.getElementById('modal-content').textContent = 'Loading…';
+  document.getElementById('file-modal').classList.add('open');
+
+  try {
+    const res = await fetch(`${API}/api/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: `Read the file: ${relPath}` }),
+    });
+    // We actually want to use the dedicated file-read via the tool path;
+    // but since the API exposes /api/ask we trigger a read via the question.
+    // Alternatively call a dedicated endpoint if available.
+    // For simplicity, show a placeholder.
+    document.getElementById('modal-content').textContent =
+      `File: ${relPath}\n\nUse "Read the file: ${relPath}" in the chat to view its contents via the agent.`;
+  } catch (err) {
+    document.getElementById('modal-content').textContent = 'Error loading file: ' + err.message;
+  }
+}
+
+function closeModal() {
+  document.getElementById('file-modal').classList.remove('open');
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+});
+
+/* ==============================================================
+   INIT
+============================================================== */
+refreshStatus();
+// Poll status while indexing
+setInterval(() => {
+  if (repoLoaded) refreshStatus();
+}, 10000);
+</script>
+</body>
+</html>

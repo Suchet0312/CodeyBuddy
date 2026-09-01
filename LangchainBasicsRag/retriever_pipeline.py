@@ -1,5 +1,9 @@
-from hybrid import reciprocal_rank_fusion
-from reranker import rerank_documents
+try:
+    from hybrid import reciprocal_rank_fusion
+    from reranker import rerank_documents
+except ImportError:
+    from LangchainBasicsRag.hybrid import reciprocal_rank_fusion
+    from LangchainBasicsRag.reranker import rerank_documents
 
 
 def retrieve_hybrid(
